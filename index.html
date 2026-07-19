@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบคะแนนกิจกรรมนักเรียน (ONLINE)</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+</head>
+<body class="bg-gray-50 font-sans antialiased text-gray-800">
+
+    <div id="app" class="flex h-screen overflow-hidden relative">
+        
+        <!-- Loading Overlay สำหรับช่วงเวลาที่รอดึง/ส่งข้อมูลจาก Google Sheets -->
+        <div v-if="isLoading" class="absolute inset-0 bg-black/50 z-50 flex flex-col justify-center items-center text-white text-lg font-semibold gap-3">
+            <i class="fa-solid fa-spinner animate-spin text-4xl text-yellow-400"></i>
+            กำลังเชื่อมต่อกับฐานข้อมูล Google Sheets...
+        </div>
+
+        <!-- Sidebar -->
+        <div class="w-64 bg-indigo-900 text-white flex flex-col justify-between hidden md:flex">
+            <div class="p-5">
+                <h1 class="text-xl font-bold tracking-wider flex items-center gap-2">
+                    <i class="fa-solid fa-graduation-cap text-yellow-400"></i> ActiveScore
+                </h1>
+                <p class="text-xs text-indigo-300 mt-1">ระบบออนไลน์ + LINE Bot</p>
+                <nav class="mt-8 space-y-2">
+                    <button @click="currentTab = 'students'" :class="{'bg-indigo-800 text-white': currentTab === 'students', 'text-indigo-200 hover:bg-indigo-800': currentTab !== 'students'}" class="w-full text-left py-2.5 px-4 rounded transition flex items-center gap-3 cursor-pointer">
+                        <i class="fa-solid fa-users w-5"></i> จัดการรายชื่อนักเรียน
+                    </button>
+                    <button @click="currentTab = 'attendance'" :class="{'bg-indigo-800 text-white': currentTab === 'attendance', 'text-indigo-200 hover:bg-indigo-800': currentTab !== 'attendance'}" class="w-full text-left py-2.5 px-4 rounded transition flex items-center gap-3 cursor-pointer">
+                        <i class="fa-solid fa-calendar-check w-5"></i> เช็คชื่อเข้าแถว (-5)
+                    </button>
+                    <button @click="currentTab = 'gooddeeds'" :class="{'bg-indigo-800 text-white': currentTab === 'gooddeeds', 'text-indigo-200 hover:bg-indigo-800': currentTab !== 'gooddeeds'}" class="w-full text-left py-2.5 px-4 rounded transition flex items-center gap-3 cursor-pointer">
+                        <i class="fa-solid fa-heart w-5"></i> บันทึกความดี (+)
+                    </button>
+                    <button @click="currentTab = 'logs'" :class="{'bg-indigo-800 text-white': currentTab === 'logs', 'text-indigo-200 hover:bg-indigo-800': currentTab !== 'logs'}" class="w-full text-left py-2.5 px-4 rounded transition flex items-center gap-3 cursor-pointer">
+                        <i class="fa-solid fa-history w-5"></i> ประวัติการปรับคะแนน
+                    </button>
+                </nav>
+            </div>
+            <div class="p-4 border-t border-indigo-800 text-xs text-center text-indigo-300">Google Sheets DB Connected</div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="flex-1 flex flex-col overflow-y-auto">
+            <header class="bg-white shadow-sm py-4 px-6 flex justify-between items-center">
+                <h2 class="text-xl font-semibold text-gray-800">
+                    <span v-if="currentTab === 'students'">📝 จัดการรายชื่อนักเรียน</span>
+                    <span v-if="currentTab === 'attendance'">📅 เช็คชื่อเข้าแถวเคารพธงชาติ (ส่งแจ้งเตือน LINE)</span>
+                    <span v-if="currentTab === 'gooddeeds'">✨ บันทึกทำความดี (ส่งแจ้งเตือน LINE)</span>
+                    <span v-if="currentTab === 'logs'">📜 ประวัติใน Google Sheets</span>
+                </h2>
+                <div class="text-sm text-gray-500">นักเรียนทั้งหมด: <b>{{ students.length }}</b> คน</div>
+            </header>
+
+            <main class="p-6 max-w-7xl w-full mx-auto">
+                
+                <!-- TAB 1: STUDENT MANAGEMENT -->
+                <div v-if="currentTab === 'students'" class="space-y-6">
+                    <div class="bg-white p-6 rounded-xl shadow-xs border border-gray-200">
+                        <h3 class="text-lg font-medium mb-4 text-indigo-900">{{ isEditing ? '✏️ แก้ไขข้อมูลนักเรียน' : '➕ เพิ่มนักเรียนใหม่' }}</h3>
+                        <form @submit.prevent="saveStudent" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">รหัสนักเรียน/นักศึกษา</label>
+                                <input v-model="studentForm.studentId" type="text" required class="w-full p-2 border border-gray-300 rounded-md" placeholder="เช่น 66001">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">ชื่อ-นามสกุล</label>
+                                <input v-model="studentForm.name" type="text" required class="w-full p-2 border border-gray-300 rounded-md" placeholder="นายสมชาย ใจดี">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">ชั้นเรียน / ห้อง</label>
+                                <input v-model="studentForm.room" type="text" required class="w-full p-2 border border-gray-300 rounded-md" placeholder="เช่น ม.6/1">
+                            </div>
+                            <div class="flex gap-2">
+                                <button type="submit" class="flex-1 bg-indigo-600 text-white font-medium py-2 px-4 rounded-md hover:bg-indigo-700 transition cursor-pointer">
+                                    {{ isEditing ? 'อัปเดต' : 'บันทึกไปที่ Sheets' }}
+                                </button>
+                                <button v-if="isEditing" type="button" @click="resetForm" class="bg-gray-300 text-gray-700 font-medium py-2 px-4 rounded-md cursor-pointer">ยกเลิก</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="bg-white rounded-xl shadow-xs border border-gray-200 overflow-hidden">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-gray-100 text-gray-700 font-medium text-sm">
+                                    <th class="p-4 border-b">รหัสนักเรียน</th>
+                                    <th class="p-4 border-b">ชื่อ-นามสกุล</th>
+                                    <th class="p-4 border-b">ชั้นเรียน</th>
+                                    <th class="p-4 border-b text-center">คะแนนคงเหลือ</th>
+                                    <th class="p-4 border-b text-center">จัดการ</th>
+                                </tr>
+                            </table>
+                            <div class="max-h-96 overflow-y-auto">
+                                <table class="w-full text-left border-collapse text-sm">
+                                    <tbody class="divide-y divide-gray-100">
+                                        <tr v-for="student in students" :key="student.ID" class="hover:bg-gray-50 transition">
+                                            <td class="p-4 w-1/5 font-semibold text-indigo-600">{{ student.StudentID }}</td>
+                                            <td class="p-4 w-1/4 font-medium">{{ student.Name }}</td>
+                                            <td class="p-4 w-1/5 text-gray-600">{{ student.Room }}</td>
+                                            <td class="p-4 w-1/5 text-center">
+                                                <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-green-100 text-green-800">{{ student.Points }} คะแนน</span>
+                                            </td>
+                                            <td class="p-4 w-1/5 text-center space-x-2">
+                                                <button @click="editStudent(student)" class="text-indigo-600 hover:underline cursor-pointer"><i class="fa-solid fa-pen"></i></button>
+                                                <button @click="deleteStudent(student.ID)" class="text-red-600 hover:underline cursor-pointer"><i class="fa-solid fa-trash"></i></button>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 2: ATTENDANCE -->
+                <div v-if="currentTab === 'attendance'" class="space-y-6">
+                    <div class="bg-white p-6 rounded-xl shadow-xs border border-gray-200 max-w-2xl mx-auto">
+                        <div class="flex justify-between items-center mb-6 border-b pb-4">
+                            <div>
+                                <h3 class="text-lg font-medium text-gray-900">ระบุวันที่เช็คชื่อเข้าแถว</h3>
+                                <p class="text-xs text-red-500">* คนที่ไม่มาเข้าแถวจะถูกส่งแจ้งเตือนเข้าไลน์กลุ่มโรงเรียนทันที</p>
+                            </div>
+                            <input v-model="attendanceDate" type="date" class="p-2 border border-gray-300 rounded-md">
+                        </div>
+                        <div class="space-y-3">
+                            <div v-for="student in students" :key="student.ID" class="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
+                                <div>
+                                    <span class="font-medium block text-gray-800">{{ student.Name }} ({{ student.Room }})</span>
+                                    <span class="text-xs text-gray-400">คะแนนในชีท: {{ student.Points }}</span>
+                                </div>
+                                <label class="inline-flex items-center cursor-pointer bg-white px-3 py-1.5 border rounded hover:border-red-300">
+                                    <input type="checkbox" :checked="isAbsent(student.ID, attendanceDate)" @change="toggleAbsence(student, attendanceDate)" class="accent-red-600 h-4 w-4 rounded">
+                                    <span class="ml-2 text-sm text-red-600 font-medium">❌ ขาดเข้าแถว</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 3: GOOD DEEDS -->
+                <div v-if="currentTab === 'gooddeeds'" class="max-w-xl mx-auto">
+                    <div class="bg-white p-6 rounded-xl shadow-xs border border-gray-200">
+                        <h3 class="text-lg font-medium mb-4 text-emerald-900">✨ บันทึกความดีนักเรียน (บวกคะแนนเข้าชีท + แจ้งเตือนไลน์)</h3>
+                        <form @submit.prevent="submitGoodDeed" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">เลือกนักเรียน</label>
+                                <select v-model="goodDeedForm.studentId" required class="w-full p-2 border border-gray-300 rounded-md">
+                                    <option value="">-- กรุณาเลือก --</option>
+                                    <option v-for="s in students" :value="s.ID">{{ s.StudentID }} - {{ s.Name }} ({{ s.Room }})</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">ความดีที่ทำ</label>
+                                <textarea v-model="goodDeedForm.description" required rows="3" class="w-full p-2 border border-gray-300 rounded-md" placeholder="เช่น ช่วยงานทาสีโรงเรียน หรือ เก็บกระเป๋าเงินคืนเจ้าของ"></textarea>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">คะแนนที่เพิ่มให้</label>
+                                <input v-model.number="goodDeedForm.points" type="number" min="1" required class="w-full p-2 border border-gray-300 rounded-md">
+                            </div>
+                            <button type="submit" class="w-full bg-emerald-600 text-white font-medium py-2 rounded-md hover:bg-emerald-700 transition cursor-pointer">
+                                🚀 บันทึก & ส่งแจ้งเตือนไลน์
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- TAB 4: LOGS -->
+                <div v-if="currentTab === 'logs'" class="space-y-4">
+                    <div class="bg-white rounded-xl shadow-xs border border-gray-200 overflow-hidden">
+                        <table class="w-full text-left border-collapse text-sm">
+                            <thead>
+                                <tr class="bg-gray-100 text-gray-700 font-medium">
+                                    <th class="p-4 border-b">วันที่</th>
+                                    <th class="p-4 border-b">นักเรียน</th>
+                                    <th class="p-4 border-b">ประเภท</th>
+                                    <th class="p-4 border-b">รายละเอียด</th>
+                                    <th class="p-4 border-b text-center">คะแนน</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100">
+                                <tr v-for="log in sortedLogs" :key="log.ID">
+                                    <td class="p-4 text-gray-500">{{ log.Date }}</td>
+                                    <td class="p-4 font-medium">{{ getStudentName(log.StudentID) }}</td>
+                                    <td class="p-4">
+                                        <span :class="log.Type === 'deduct' ? 'bg-red-100 text-red-800':'bg-green-100 text-green-800'" class="px-2 py-0.5 rounded text-xs font-semibold">
+                                            {{ log.Type === 'deduct' ? 'หักคะแนน' : 'เพิ่มคะแนน' }}
+                                        </span>
+                                    </td>
+                                    <td class="p-4 text-gray-600">{{ log.Description }}</td>
+                                    <td class="p-4 text-center font-bold" :class="log.Type === 'deduct' ? 'text-red-600':'text-green-600'">
+                                        {{ log.Score }}
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </main>
+        </div>
+    </div>
+
+    <script>
+        // ⚠️ วาง URL ของ Web App จาก Google Apps Script ที่ได้จากขั้นตอนที่ 3 ตรงนี้
+        const API_URL = "https://script.google.com/macros/s/AKfycbw1V-wgi5UiKfPFGRD1fMeDM6tPmUVlEkYgjW4OqMtuTNve-cVHvbRtrxcnBLZNhT5_Ig/exec"; 
+
+        const { createApp, ref, computed, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                const currentTab = ref('students');
+                const isLoading = ref(false);
+                const students = ref([]);
+                const logs = ref([]);
+                const attendanceDate = ref(new Date().toISOString().split('T')[0]);
+                
+                const studentForm = ref({ id: null, studentId: '', name: '', room: '' });
+                const isEditing = ref(false);
+                const goodDeedForm = ref({ studentId: '', description: '', points: 5 });
+
+                // ฟังก์ชันดึงข้อมูลจาก Google Sheets ทั้งหมด
+                const fetchData = async () => {
+                    isLoading.value = true;
+                    try {
+                        const response = await fetch(API_URL, {
+                            method: "POST",
+                            body: JSON.stringify({ action: "getAllData" })
+                        });
+                        const res = await response.json();
+                        if (res.success) {
+                            students.value = res.students;
+                            logs.value = res.logs;
+                        }
+                    } catch (e) { alert("ดึงข้อมูลจาก Google Sheets ล้มเหลว กรุณาตรวจสอบลิงก์ API"); }
+                    isLoading.value = false;
+                };
+
+                onMounted(fetchData);
+
+                // บันทึก/แก้ไขข้อมูลนักเรียน
+                const saveStudent = async () => {
+                    isLoading.value = true;
+                    const id = studentForm.value.id || Date.now();
+                    const payload = {
+                        action: "saveStudent",
+                        data: {
+                            id: id,
+                            studentId: studentForm.value.studentId,
+                            name: studentForm.value.name,
+                            room: studentForm.value.room,
+                            points: 100
+                        }
+                    };
+                    await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
+                    resetForm();
+                    await fetchData();
+                };
+
+                const editStudent = (student) => {
+                    studentForm.value = { id: student.ID, studentId: student.StudentID, name: student.Name, room: student.Room };
+                    isEditing.value = true;
+                };
+
+                const deleteStudent = async (id) => {
+                    if (confirm("ลบรายชื่อนักเรียนคนนี้ออกจากฐานข้อมูล?")) {
+                        isLoading.value = true;
+                        await fetch(API_URL, { method: "POST", body: JSON.stringify({ action: "deleteStudent", id: id }) });
+                        await fetchData();
+                    }
+                };
+
+                const resetForm = () => {
+                    studentForm.value = { id: null, studentId: '', name: '', room: '' };
+                    isEditing.value = false;
+                };
+
+                // การเช็คชื่อขาดเข้าแถว
+                const isAbsent = (studentId, date) => {
+                    return logs.value.some(log => log.StudentID == studentId && log.Date === date && log.Meta === 'flag_ceremony');
+                };
+
+                const toggleAbsence = async (student, date) => {
+                    isLoading.value = true;
+                    const payload = {
+                        action: "toggleAbsence",
+                        studentId: student.ID,
+                        name: student.Name,
+                        room: student.Room,
+                        date: date
+                    };
+                    await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
+                    await fetchData();
+                };
+
+                // ส่งข้อมูลเพิ่มคะแนนความดี
+                const submitGoodDeed = async () => {
+                    const student = students.value.find(s => s.ID == goodDeedForm.value.studentId);
+                    if (!student) return;
+
+                    isLoading.value = true;
+                    const payload = {
+                        action: "submitGoodDeed",
+                        studentId: student.ID,
+                        name: student.Name,
+                        room: student.Room,
+                        description: goodDeedForm.value.description,
+                        points: goodDeedForm.value.points
+                    };
+                    await fetch(API_URL, { method: "POST", body: JSON.stringify(payload) });
+                    goodDeedForm.value = { studentId: '', description: '', points: 5 };
+                    await fetchData();
+                    alert("บันทึกความดีเรียบร้อย!");
+                };
+
+                const getStudentName = (id) => {
+                    const s = students.value.find(x => x.ID == id);
+                    return s ? `${s.Name} (${s.Room})` : 'ไม่ระบุชื่อ';
+                };
+
+                const sortedLogs = computed(() => {
+                    return [...logs.value].sort((a, b) => b.ID - a.ID);
+                });
+
+                return {
+                    currentTab, isLoading, students, logs, attendanceDate, studentForm, isEditing, goodDeedForm,
+                    saveStudent, editStudent, deleteStudent, resetForm, isAbsent, toggleAbsence, submitGoodDeed,
+                    getStudentName, sortedLogs
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
